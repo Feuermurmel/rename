@@ -17,6 +17,7 @@ from rename.renames_file import read_renames_file
 from rename.renames_file import write_renames_file
 from rename.utils import UserError
 from rename.utils import edit_csv
+from rename.utils import numeric_sort_key
 
 
 def gather_file_paths(no_traverse: bool, paths: list[Path]) -> list[Path]:
@@ -31,7 +32,10 @@ def gather_file_paths(no_traverse: bool, paths: list[Path]) -> list[Path]:
         else:
             for dirpath, dirnames, filenames in path.walk():
                 for list in dirnames, filenames:
-                    list[:] = sorted(i for i in list if not i.startswith("."))
+                    list[:] = sorted(
+                        (i for i in list if not i.startswith(".")),
+                        key=lambda x: numeric_sort_key(str(x)),
+                    )
 
                 for i in filenames:
                     file_path = dirpath / i
