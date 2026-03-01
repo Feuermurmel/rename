@@ -2,6 +2,7 @@ import logging
 import shlex
 import sys
 from argparse import ArgumentParser
+from argparse import ArgumentTypeError
 from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
@@ -46,30 +47,138 @@ def gather_file_paths(no_traverse: bool, paths: list[Path]) -> list[Path]:
     return file_paths
 
 
+def existing_path(arg: str) -> Path:
+    path = Path(arg)
+
+    if not path.exists():
+        raise ArgumentTypeError(f"Path does not exist: {path}")
+
+    if not path.is_file():
+        raise ArgumentTypeError(f"Path is not a regular file: {path}")
+
+    return path
+
+
 def parse_args() -> Namespace:
-    parser = ArgumentParser()
+    parser = ArgumentParser(
+        description="Either start, continue, or revert a rename operation."
+    )
 
     action_group = parser.add_mutually_exclusive_group(required=True)
 
-    action_group.add_argument("-a", "--apply", type=Path)
-    action_group.add_argument("-r", "--revert", type=Path)
-    action_group.add_argument("paths", nargs="*", type=Path)
+    action_group.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help=(
+            "Start a rename operation using the given files and directories. "
+            "All regular files in specified directories are collected, "
+            "unless --no-traverse is specified. The collected paths will then "
+            "be written to a CSV files, which is then opened for editing. "
+            "The script will wait until edits are done and then apply the renames."
+        ),
+    )
 
-    parser.add_argument("-d", "--no-traverse", action="store_true")
+    action_group.add_argument(
+        "-e",
+        "--edit",
+        type=existing_path,
+        help=(
+            "Skip collecting files, and instead re-open a previous CSV file "
+            "for editing. The script will wait until edits are done and then "
+            "apply the renames."
+        ),
+    )
+
+    action_group.add_argument(
+        "-a",
+        "--apply",
+        type=existing_path,
+        help=(
+            "Skip collecting files and editing the CSV file, and continue "
+            "applying renames from a previous operation that has been "
+            "interrupted."
+        ),
+    )
+
+    action_group.add_argument(
+        "-r",
+        "--revert",
+        type=Path,
+        help=(
+            "Instead of starting a rename operation, revert previously "
+            "applied renames."
+        ),
+    )
+
+    parser.add_argument(
+        "-d",
+        "--no-traverse",
+        action="store_true",
+        help=(
+            "Use the specified paths as-is without traversing directories "
+            "and collecting files."
+        ),
+    )
 
     args = parser.parse_args()
 
     if not args.paths and args.no_traverse:
-        parser.error("--no-traverse cannot be combined with --apply or --revert.")
+        parser.error(
+            "--no-traverse cannot be combined with --edit, --apply or --revert."
+        )
 
     return args
 
 
+def _apply(csv_path: Path) -> None:
+    try:
+        apply_renames(read_renames_file(csv_path))
+    except Exception, KeyboardInterrupt:
+        logging.warning(
+            f"\n"
+            f"Renaming was interrupted. You can continue the operation "
+            f"with this command:\n"
+            f"{quote(sys.argv[0])} --apply={shlex.quote(str(csv_path))}"
+        )
+
+        raise
+    finally:
+        logging.warning(
+            f"\n"
+            f"The renames can be reverted with this command:\n"
+            f"{quote(sys.argv[0])} --revert={shlex.quote(str(csv_path))}"
+        )
+
+
+def _edit_apply(csv_path: Path) -> None:
+
+    try:
+        edit_csv(csv_path)
+    except Exception, KeyboardInterrupt:
+        logging.warning(
+            f"\n"
+            f"Editing was interrupted. You can continue editing with "
+            f"this command:\n"
+            f"{quote(sys.argv[0])} --apply={shlex.quote(str(csv_path))} --edit"
+        )
+
+        raise
+
+    _apply(csv_path)
+
+
 def main(
-    apply: Path | None, revert: Path | None, no_traverse: bool, paths: list[Path]
+    edit: Path | None,
+    apply: Path | None,
+    revert: Path | None,
+    no_traverse: bool,
+    paths: list[Path],
 ) -> None:
-    if apply is not None:
-        apply_renames(read_renames_file(apply))
+    if edit is not None:
+        _edit_apply(edit)
+    elif apply is not None:
+        _apply(apply)
     elif revert is not None:
         apply_renames(read_renames_file(revert).reversed())
     else:
@@ -79,41 +188,12 @@ def main(
             raise UserError("No regular files found in paths.")
 
         csv_file_name = f"rename-{paths[0].name}-{datetime.now():%Y-%m-%d-%H%M%S}.csv"
-        csv_file_path = user_data_path("rename", ensure_exists=True) / csv_file_name
+        csv_path = user_data_path("rename", ensure_exists=True) / csv_file_name
 
-        assert not csv_file_path.exists()
+        assert not csv_path.exists()
 
-        write_renames_file(csv_file_path, renames)
-
-        try:
-            edit_csv(csv_file_path)
-        except Exception, KeyboardInterrupt:
-            logging.warning(
-                f"\n"
-                f"Editing was interrupted. You can continue editing with "
-                f"this command:\n"
-                f"{quote(sys.argv[0])} --edit={shlex.quote(str(csv_file_path))}"
-            )
-
-            raise
-
-        try:
-            apply_renames(read_renames_file(csv_file_path))
-        except Exception, KeyboardInterrupt:
-            logging.warning(
-                f"\n"
-                f"Renaming was interrupted. You can continue the operation "
-                f"with this command:\n"
-                f"{quote(sys.argv[0])} --apply={shlex.quote(str(csv_file_path))}"
-            )
-
-            raise
-        finally:
-            logging.warning(
-                f"\n"
-                f"The renames can be reverted with this command:\n"
-                f"{quote(sys.argv[0])} --revert={shlex.quote(str(csv_file_path))}"
-            )
+        write_renames_file(csv_path, renames)
+        _edit_apply(csv_path)
 
 
 def entry_point() -> None:
