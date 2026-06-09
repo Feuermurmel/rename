@@ -134,7 +134,7 @@ def parse_args() -> Namespace:
 def _apply(csv_path: Path) -> None:
     try:
         apply_renames(read_renames_file(csv_path))
-    except Exception, KeyboardInterrupt:
+    except (Exception, KeyboardInterrupt):
         logging.warning(
             f"\n"
             f"Renaming was interrupted. You can continue the operation "
@@ -155,7 +155,7 @@ def _edit_apply(csv_path: Path) -> None:
 
     try:
         edit_csv(csv_path)
-    except Exception, KeyboardInterrupt:
+    except (Exception, KeyboardInterrupt):
         logging.warning(
             f"\n"
             f"Editing was interrupted. You can continue editing with "
