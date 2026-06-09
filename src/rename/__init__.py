@@ -164,6 +164,26 @@ def _apply(csv_path: Path) -> None:
         )
 
 
+def _revert(csv_path: Path) -> None:
+    try:
+        apply_renames(read_renames_file(csv_path).reversed())
+    except (Exception, KeyboardInterrupt):
+        logging.warning(
+            f"\n"
+            f"Renaming was interrupted. You can continue the operation "
+            f"with this command:\n"
+            f"{quote(sys.argv[0])} --revert={shlex.quote(str(csv_path))}"
+        )
+
+        raise
+    finally:
+        logging.warning(
+            f"\n"
+            f"The renames can be edited and re-applied with this command:\n"
+            f"{quote(sys.argv[0])} --edit={shlex.quote(str(csv_path))}"
+        )
+
+
 def _edit_apply(csv_path: Path) -> None:
     try:
         edit_csv(csv_path)
@@ -193,7 +213,7 @@ def main(
     elif apply is not None:
         _apply(apply)
     elif revert is not None:
-        apply_renames(read_renames_file(revert).reversed())
+        _revert(revert)
     else:
         renames = create_renames(gather_file_paths(no_traverse, paths), base)
 
