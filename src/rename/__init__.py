@@ -64,6 +64,15 @@ def parse_args() -> Namespace:
         description="Either start, continue, or revert a rename operation."
     )
 
+    parser.add_argument(
+        "--base",
+        type=Path,
+        help=(
+            "Base path to use for the generated CSV file. All paths of collected "
+            "files will be made relative to this path. Requires --edit."
+        ),
+    )
+
     action_group = parser.add_mutually_exclusive_group(required=True)
 
     action_group.add_argument(
@@ -123,10 +132,14 @@ def parse_args() -> Namespace:
 
     args = parser.parse_args()
 
-    if not args.paths and args.no_traverse:
-        parser.error(
-            "--no-traverse cannot be combined with --edit, --apply or --revert."
-        )
+    if not args.paths:
+        if args.no_traverse:
+            parser.error(
+                "--no-traverse cannot be combined with --edit, --apply or --revert."
+            )
+
+        if args.base is not None:
+            parser.error("--base cannot be combined with --edit, --apply or --revert.")
 
     return args
 
@@ -152,7 +165,6 @@ def _apply(csv_path: Path) -> None:
 
 
 def _edit_apply(csv_path: Path) -> None:
-
     try:
         edit_csv(csv_path)
     except (Exception, KeyboardInterrupt):
@@ -174,6 +186,7 @@ def main(
     revert: Path | None,
     no_traverse: bool,
     paths: list[Path],
+    base: Path | None,
 ) -> None:
     if edit is not None:
         _edit_apply(edit)
@@ -182,7 +195,7 @@ def main(
     elif revert is not None:
         apply_renames(read_renames_file(revert).reversed())
     else:
-        renames = create_renames(gather_file_paths(no_traverse, paths))
+        renames = create_renames(gather_file_paths(no_traverse, paths), base)
 
         if not renames.renames:
             raise UserError("No regular files found in paths.")

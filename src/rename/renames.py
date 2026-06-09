@@ -2,6 +2,7 @@ import logging
 from collections import Counter
 from functools import reduce
 from pathlib import Path
+from typing import Never
 
 from rename.renames_file import Rename
 from rename.renames_file import Renames
@@ -32,18 +33,35 @@ def _common_prefix(path_1: Path, path_2: Path) -> Path:
     assert False
 
 
-def create_renames(file_paths: list[Path]) -> Renames:
+def create_renames(file_paths: list[Path], explicit_base_path: Path | None) -> Renames:
     dirs_by_root: dict[str, set[Path]] = {}
 
     for i in file_paths:
         dirs_by_root.setdefault(i.root, set()).add(i.parent)
 
-    base_paths_by_root = {k: reduce(_common_prefix, v) for k, v in dirs_by_root.items()}
+    if explicit_base_path is None:
+        base_paths_by_root = {
+            k: reduce(_common_prefix, v) for k, v in dirs_by_root.items()
+        }
+    else:
+        base_paths_by_root = {explicit_base_path.root: explicit_base_path}
+
     renames = []
 
     for i in file_paths:
-        base_path = base_paths_by_root[i.root]
-        relative_path = i.relative_to(base_path)
+
+        def raise_not_contained_in_base_path() -> Never:
+            raise UserError(f"{i} is not contained in base path {explicit_base_path}.")
+
+        base_path = base_paths_by_root.get(i.root)
+
+        if base_path is None:
+            raise_not_contained_in_base_path()
+
+        try:
+            relative_path = i.relative_to(base_path)
+        except ValueError:
+            raise_not_contained_in_base_path()
 
         base_path_str = _path_to_str(base_path)
         dir_str = _path_to_str(relative_path.parent)
@@ -90,6 +108,9 @@ def apply_renames(renames: Renames) -> None:
 
     for i in set(old_paths).intersection(new_paths):
         raise UserError(f"{i} is both a source and a destination.")
+
+    if not moved_files:
+        logging.info("No files to rename.")
 
     for old_path, new_path in moved_files:
         if not new_path.parent.exists(follow_symlinks=True):
